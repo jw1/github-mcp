@@ -1,0 +1,28 @@
+# Secrets and credentials
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.pfx
+config/secrets.yml
+
+# API tokens and auth
+*token*
+*secret*
+*credentials*
+
+# Personal data
+.git/
+node_modules/
+venv/
+__pycache__/
+*.pyc
+
+# Large files Claude doesn't need
+*.log
+*.sqlite
+*.db
+dist/
+build/
+.next/
