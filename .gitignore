@@ -34,7 +34,6 @@ ENV/
 # Environment variables
 .env
 .env.local
-.env.example
 
 # OAuth tokens
 tokens.json
