@@ -8,7 +8,7 @@ The GitHub API uses simple token-based authentication:
 """
 
 import logging
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 import httpx
 
@@ -37,7 +37,7 @@ class GitHubClient:
                 "Authorization": f"token {token}",
                 "Accept": "application/vnd.github.v3+json",
                 "X-GitHub-Api-Version": "2022-11-28",
-            },
+            }
         )
 
     def _api_request(self, method: str, endpoint: str, **kwargs) -> Union[dict[str, Any], list[Any]]:
@@ -72,10 +72,12 @@ class GitHubClient:
 
         except httpx.HTTPStatusError as e:
             status_code = e.response.status_code
+            
             if status_code == 401:
                 raise ValueError(
                     "Authentication failed. Check your GITHUB_TOKEN."
                 ) from e
+            
             elif status_code == 403:
                 # Could be rate limit or insufficient permissions
                 if "rate limit" in e.response.text.lower():
@@ -87,8 +89,10 @@ class GitHubClient:
                     raise ValueError(
                         "Access forbidden. Check token permissions (need 'repo' scope)."
                     ) from e
+                
             elif status_code == 404:
                 raise ValueError("Resource not found or not accessible.") from e
+            
             else:
                 raise ValueError(f"GitHub API error: {e.response.text}") from e
 
@@ -128,7 +132,7 @@ class GitHubClient:
             "affiliation": "owner,collaborator,organization_member",
         }
 
-        repos = self._api_request("GET", "/user/repos", params=params)
+        repos = cast(list[dict[str, Any]], self._api_request("GET", "/user/repos", params=params))
         return repos
 
     def get_repo_details(self, repo_name: str) -> dict[str, Any]:
@@ -145,12 +149,34 @@ class GitHubClient:
         endpoint = f"/repos/{owner}/{repo}"
 
         # Get basic repo info
-        repo_data = self._api_request("GET", endpoint)
+        repo_data = cast(dict[str, Any], self._api_request("GET", endpoint))
 
-        # Try to get language breakdown (not critical if it fails)
+        # Try to get language breakdown (not critical if it fails).
+        # The languages endpoint should return a mapping of language -> bytes (ints).
         try:
             languages = self._api_request("GET", f"{endpoint}/languages")
-            repo_data["language_breakdown"] = languages
+
+            # Safely handle unexpected types coming from the API or mocks.
+            if isinstance(languages, dict):
+                coerced: dict[str, int] = {}
+                for k, v in languages.items():
+                    try:
+                        coerced[k] = int(v)
+                    except Exception:
+                        # Skip values that cannot be coerced to int
+                        logger.debug(
+                            "Skipping non-numeric language value for %s: %r",
+                            k,
+                            v,
+                        )
+                repo_data["language_breakdown"] = coerced
+            else:
+                logger.debug(
+                    "Unexpected languages response type for %s: %s",
+                    repo_name,
+                    type(languages),
+                )
+                repo_data["language_breakdown"] = {}
         except Exception as e:
             logger.debug(f"Could not fetch languages for {repo_name}: {e}")
             repo_data["language_breakdown"] = {}
@@ -176,7 +202,7 @@ class GitHubClient:
 
         params = {"q": search_query, "per_page": min(per_page, 100)}
 
-        return self._api_request("GET", "/search/code", params=params)
+        return cast(dict[str, Any], self._api_request("GET", "/search/code", params=params))
 
     def get_user_events(self, per_page: int = 30) -> list[dict[str, Any]]:
         """
@@ -191,4 +217,4 @@ class GitHubClient:
         params = {"per_page": min(per_page, 100)}
 
         endpoint = f"/users/{self.username}/events"
-        return self._api_request("GET", endpoint, params=params)
+        return cast(list[dict[str, Any]], self._api_request("GET", endpoint, params=params))

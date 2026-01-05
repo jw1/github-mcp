@@ -124,7 +124,7 @@ async def list_tools() -> list[Tool]:
 
 
 @server.call_tool()
-async def call_tool(name: str, arguments: Any) -> list[TextContent]:
+async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     """
     Handle tool calls from Claude.
 
@@ -259,7 +259,7 @@ async def get_repo_details(repo_name: str) -> list[TextContent]:
     result_lines.append(f"- **Last Updated:** {updated_str}")
 
     # Language breakdown
-    language_breakdown = repo.get("language_breakdown", {})
+    language_breakdown: dict[str, int] = repo.get("language_breakdown", {})
     if language_breakdown:
         result_lines.append("\n## Language Breakdown")
         # Sort by bytes of code
@@ -274,7 +274,7 @@ async def get_repo_details(repo_name: str) -> list[TextContent]:
             result_lines.append(f"- ...and {len(sorted_langs) - 5} more")
 
     # Topics
-    topics = repo.get("topics", [])
+    topics: list[str] = repo.get("topics", [])
     if topics:
         result_lines.append("\n## Topics")
         result_lines.append(f"{', '.join(topics)}")
@@ -289,7 +289,7 @@ async def get_repo_details(repo_name: str) -> list[TextContent]:
         result_lines.append(f"- **Homepage:** {homepage}")
 
     # License
-    license_info = repo.get("license")
+    license_info: dict[str, Any] | None = repo.get("license")
     if license_info:
         license_name = license_info.get("name", "Unknown")
         result_lines.append(f"\n**License:** {license_name}")
@@ -302,8 +302,8 @@ async def search_my_code(query: str, limit: int = 30) -> list[TextContent]:
     assert github is not None, "GitHub client not initialized"
     results = github.search_code(query, per_page=limit)
 
-    total_count = results.get("total_count", 0)
-    items = results.get("items", [])
+    total_count: int = results.get("total_count", 0)
+    items: list[dict[str, Any]] = results.get("items", [])
 
     if total_count == 0:
         return [
@@ -317,7 +317,8 @@ async def search_my_code(query: str, limit: int = 30) -> list[TextContent]:
     result_lines.append(f"Found {total_count} matches (showing first {len(items)})\n")
 
     for item in items:
-        repo_name = item.get("repository", {}).get("full_name", "Unknown")
+        repository: dict[str, Any] = item.get("repository", {})
+        repo_name = repository.get("full_name", "Unknown")
         file_path = item.get("path", "Unknown")
         html_url = item.get("html_url", "")
 
@@ -345,7 +346,8 @@ async def get_recent_activity(limit: int = 30) -> list[TextContent]:
 
     for event in events:
         event_type = event.get("type", "Unknown")
-        repo_name = event.get("repo", {}).get("name", "Unknown")
+        repo_info: dict[str, Any] = event.get("repo", {})
+        repo_name = repo_info.get("name", "Unknown")
         created_at = event.get("created_at", "")
 
         # Format timestamp
@@ -357,8 +359,9 @@ async def get_recent_activity(limit: int = 30) -> list[TextContent]:
 
         # Parse event details based on type
         if event_type == "PushEvent":
-            payload = event.get("payload", {})
-            commits_count = len(payload.get("commits", []))
+            payload: dict[str, Any] = event.get("payload", {})
+            commits: list[Any] = payload.get("commits", [])
+            commits_count = len(commits)
             ref = payload.get("ref", "unknown branch")
             branch = ref.split("/")[-1] if "/" in ref else ref
             result_lines.append(
@@ -366,23 +369,23 @@ async def get_recent_activity(limit: int = 30) -> list[TextContent]:
             )
 
         elif event_type == "PullRequestEvent":
-            payload = event.get("payload", {})
+            payload: dict[str, Any] = event.get("payload", {})
             action = payload.get("action", "unknown")
-            pr = payload.get("pull_request", {})
+            pr: dict[str, Any] = payload.get("pull_request", {})
             pr_title = pr.get("title", "Unknown PR")
             result_lines.append(f"\n🔀 **Pull Request** {action} in {repo_name}")
             result_lines.append(f"   {pr_title}")
 
         elif event_type == "IssuesEvent":
-            payload = event.get("payload", {})
+            payload: dict[str, Any] = event.get("payload", {})
             action = payload.get("action", "unknown")
-            issue = payload.get("issue", {})
+            issue: dict[str, Any] = payload.get("issue", {})
             issue_title = issue.get("title", "Unknown Issue")
             result_lines.append(f"\n🐛 **Issue** {action} in {repo_name}")
             result_lines.append(f"   {issue_title}")
 
         elif event_type == "CreateEvent":
-            payload = event.get("payload", {})
+            payload: dict[str, Any] = event.get("payload", {})
             ref_type = payload.get("ref_type", "unknown")
             result_lines.append(f"\n✨ **Created** {ref_type} in {repo_name}")
 
