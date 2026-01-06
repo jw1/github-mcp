@@ -110,7 +110,7 @@ class GitHubClient:
             parts = repo_name.split("/", 1)
             return parts[0], parts[1]
         else:
-            # Assume it's the authenticated user's repo
+            # assume authenticated user's repo
             return self.username, repo_name
 
     def get_user_repos(

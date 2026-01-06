@@ -2,6 +2,7 @@
 Tests for MCP server tool handlers - ensures tools call the right client methods.
 """
 
+import json
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from mcp.types import TextContent
@@ -71,7 +72,7 @@ class TestGetMyRepos:
 
     @pytest.mark.asyncio
     async def test_formats_repo_list(self, mock_github_client):
-        """Should format repository information."""
+        """Should format repository information as JSON."""
         mock_github_client.get_user_repos.return_value = [
             {
                 "name": "test-repo",
@@ -89,10 +90,28 @@ class TestGetMyRepos:
         with patch.object(server, 'github', mock_github_client):
             result = await server.get_my_repos()
 
-        text = result[0].text
-        assert "test-repo" in text
-        assert "A test repository" in text
-        assert "Python" in text
+        # Parse JSON response
+        data = json.loads(result[0].text)
+
+        # Validate summary
+        assert data["summary"]["user"] == "testuser"
+        assert data["summary"]["count"] == 1
+        assert data["summary"]["total_stars"] == 5
+        assert data["summary"]["total_forks"] == 2
+        assert data["summary"]["sorted_by"] == "recently_updated"
+
+        # Validate repository data
+        assert len(data["repositories"]) == 1
+        repo = data["repositories"][0]
+        assert repo["name"] == "test-repo"
+        assert repo["full_name"] == "testuser/test-repo"
+        assert repo["description"] == "A test repository"
+        assert repo["stars"] == 5
+        assert repo["forks"] == 2
+        assert repo["language"] == "Python"
+        assert repo["visibility"] == "public"
+        assert repo["updated_at"] == "2024-01-01T00:00:00Z"
+        assert repo["url"] == "https://github.com/testuser/test-repo"
 
 
 class TestGetRepoDetails:
@@ -110,26 +129,51 @@ class TestGetRepoDetails:
 
     @pytest.mark.asyncio
     async def test_formats_repo_details(self, mock_github_client):
-        """Should format repository details."""
+        """Should format repository details as JSON."""
         with patch.object(server, 'github', mock_github_client):
             result = await server.get_repo_details("testuser/test-repo")
 
-        text = result[0].text
-        assert "test-repo" in text
-        assert "Test repository" in text
-        assert "10" in text  # stars
-        assert "Python" in text
+        # Parse JSON response
+        data = json.loads(result[0].text)
+
+        # Validate basic info
+        assert data["full_name"] == "testuser/test-repo"
+        assert data["description"] == "Test repository"
+
+        # Validate statistics
+        assert data["statistics"]["stars"] == 10
+        assert data["statistics"]["forks"] == 5
+        assert data["statistics"]["watchers"] == 3
+        assert data["statistics"]["open_issues"] == 2
+
+        # Validate details
+        assert data["details"]["primary_language"] == "Python"
+        assert data["details"]["visibility"] == "public"
+        assert data["details"]["default_branch"] == "main"
+        assert data["details"]["created_at"] == "2024-01-01T00:00:00Z"
+        assert data["details"]["updated_at"] == "2024-01-02T00:00:00Z"
 
     @pytest.mark.asyncio
     async def test_includes_language_breakdown(self, mock_github_client):
-        """Should include language breakdown when available."""
+        """Should include language breakdown percentages when available."""
         with patch.object(server, 'github', mock_github_client):
             result = await server.get_repo_details("test-repo")
 
-        text = result[0].text
-        assert "Language Breakdown" in text
-        assert "Python" in text
-        assert "JavaScript" in text
+        # Parse JSON response
+        data = json.loads(result[0].text)
+
+        # Validate language breakdown (percentages)
+        assert "language_breakdown" in data
+        assert "Python" in data["language_breakdown"]
+        assert "JavaScript" in data["language_breakdown"]
+        # 1000 / 1500 = 66.7%
+        assert data["language_breakdown"]["Python"] == 66.7
+        # 500 / 1500 = 33.3%
+        assert data["language_breakdown"]["JavaScript"] == 33.3
+
+        # Validate topics and URLs
+        assert data["topics"] == ["mcp", "testing"]
+        assert data["urls"]["repository"] == "https://github.com/testuser/test-repo"
 
 
 class TestSearchMyCode:
@@ -155,18 +199,21 @@ class TestSearchMyCode:
 
     @pytest.mark.asyncio
     async def test_handles_no_results(self, mock_github_client):
-        """Should return appropriate message when no matches found."""
+        """Should return JSON with empty matches when no results found."""
         mock_github_client.search_code.return_value = {"total_count": 0, "items": []}
 
         with patch.object(server, 'github', mock_github_client):
             result = await server.search_my_code("nonexistent")
 
-        assert "No code matches found" in result[0].text
-        assert "nonexistent" in result[0].text
+        # Parse JSON response
+        data = json.loads(result[0].text)
+        assert data["query"] == "nonexistent"
+        assert data["total_count"] == 0
+        assert data["matches"] == []
 
     @pytest.mark.asyncio
     async def test_formats_search_results(self, mock_github_client):
-        """Should format code search results."""
+        """Should format code search results as JSON."""
         mock_github_client.search_code.return_value = {
             "total_count": 2,
             "items": [
@@ -181,9 +228,18 @@ class TestSearchMyCode:
         with patch.object(server, 'github', mock_github_client):
             result = await server.search_my_code("test")
 
-        text = result[0].text
-        assert "testuser/repo1" in text
-        assert "src/main.py" in text
+        # Parse JSON response
+        data = json.loads(result[0].text)
+
+        assert data["query"] == "test"
+        assert data["total_count"] == 2
+        assert data["returned_count"] == 1
+        assert len(data["matches"]) == 1
+
+        match = data["matches"][0]
+        assert match["repository"] == "testuser/repo1"
+        assert match["path"] == "src/main.py"
+        assert match["url"] == "https://github.com/testuser/repo1/blob/main/src/main.py"
 
 
 class TestGetRecentActivity:
@@ -209,17 +265,20 @@ class TestGetRecentActivity:
 
     @pytest.mark.asyncio
     async def test_handles_no_activity(self, mock_github_client):
-        """Should return appropriate message when no activity found."""
+        """Should return JSON with empty events when no activity found."""
         mock_github_client.get_user_events.return_value = []
 
         with patch.object(server, 'github', mock_github_client):
             result = await server.get_recent_activity()
 
-        assert "No recent activity found" in result[0].text
+        # Parse JSON response
+        data = json.loads(result[0].text)
+        assert data["user"] == "testuser"
+        assert data["events"] == []
 
     @pytest.mark.asyncio
     async def test_formats_push_event(self, mock_github_client):
-        """Should format PushEvent correctly."""
+        """Should format PushEvent as JSON with branch and commit count."""
         mock_github_client.get_user_events.return_value = [
             {
                 "type": "PushEvent",
@@ -235,15 +294,23 @@ class TestGetRecentActivity:
         with patch.object(server, 'github', mock_github_client):
             result = await server.get_recent_activity()
 
-        text = result[0].text
-        assert "Push" in text
-        assert "test-repo" in text
-        assert "main" in text
-        assert "1 commit" in text
+        # Parse JSON response
+        data = json.loads(result[0].text)
+
+        assert data["user"] == "testuser"
+        assert data["event_count"] == 1
+        assert len(data["events"]) == 1
+
+        event = data["events"][0]
+        assert event["type"] == "PushEvent"
+        assert event["repository"] == "testuser/test-repo"
+        assert event["created_at"] == "2024-01-01T12:00:00Z"
+        assert event["details"]["branch"] == "main"
+        assert event["details"]["commit_count"] == 1
 
     @pytest.mark.asyncio
     async def test_formats_pull_request_event(self, mock_github_client):
-        """Should format PullRequestEvent correctly."""
+        """Should format PullRequestEvent as JSON with action and title."""
         mock_github_client.get_user_events.return_value = [
             {
                 "type": "PullRequestEvent",
@@ -251,7 +318,7 @@ class TestGetRecentActivity:
                 "created_at": "2024-01-01T12:00:00Z",
                 "payload": {
                     "action": "opened",
-                    "pull_request": {"title": "Add new feature"},
+                    "pull_request": {"title": "Add new feature", "number": 42},
                 },
             }
         ]
@@ -259,10 +326,15 @@ class TestGetRecentActivity:
         with patch.object(server, 'github', mock_github_client):
             result = await server.get_recent_activity()
 
-        text = result[0].text
-        assert "Pull Request" in text
-        assert "opened" in text
-        assert "Add new feature" in text
+        # Parse JSON response
+        data = json.loads(result[0].text)
+
+        event = data["events"][0]
+        assert event["type"] == "PullRequestEvent"
+        assert event["repository"] == "testuser/test-repo"
+        assert event["details"]["action"] == "opened"
+        assert event["details"]["title"] == "Add new feature"
+        assert event["details"]["number"] == 42
 
 
 class TestCallToolDispatcher:
