@@ -97,7 +97,23 @@ The `httpx.Client` on line 34 is created with:
 
 This is similar to creating a `RestTemplate` with interceptors in Spring.
 
-### The Core API Method (Lines 43-97)
+**Lines 43-55:** Context manager support for resource cleanup
+```python
+def __enter__(self):
+    return self
+
+def __exit__(self, exc_type, exc_val, exc_tb):
+    self.close()
+    return False
+
+def close(self):
+    if hasattr(self, 'client'):
+        self.client.close()
+```
+
+The `GitHubClient` implements Python's context manager protocol (like Java's `AutoCloseable`). This ensures the HTTP client is properly closed when done, preventing resource leaks. You can use it with `with GitHubClient(...) as client:` for automatic cleanup.
+
+### The Core API Method (Lines 57-111)
 
 `_api_request()` is the workhorse method. The underscore prefix is Python's convention for "internal/private" (though not enforced like Java's `private`).
 
@@ -129,34 +145,40 @@ except httpx.HTTPStatusError as e:
 
 This is like Spring's `@ExceptionHandler`, but inline. The `from e` preserves the original exception stack trace (similar to `throw new CustomException(cause)`).
 
-### Public API Methods (Lines 116-220)
+### Public API Methods (Lines 130-235)
 
 Four methods that correspond to our four MCP tools:
 
-1. **`get_user_repos()`** (Lines 116-136): Lists user's repositories
-2. **`get_repo_details()`** (Lines 138-184): Gets detailed repo info
-3. **`search_code()`** (Lines 186-205): Searches code across repos
-4. **`get_user_events()`** (Lines 207-220): Gets recent activity
+1. **`get_user_repos()`** (Lines 130-150): Lists user's repositories
+2. **`get_repo_details()`** (Lines 152-198): Gets detailed repo info
+3. **`search_code()`** (Lines 201-219): Searches code across repos
+4. **`get_user_events()`** (Lines 222-235): Gets recent activity
 
-**Key pattern to notice:** Lines 148-149 in `get_repo_details()`:
+**Key pattern to notice:** Lines 162-163 in `get_repo_details()`:
 ```python
 owner, repo = self._parse_repo_name(repo_name)
 endpoint = f"/repos/{owner}/{repo}"
 ```
 
-The `_parse_repo_name()` helper (lines 99-114) handles both "owner/repo" and "repo" formats. This is defensive coding - making the API forgiving for the user.
+The `_parse_repo_name()` helper (lines 113-128) handles both "owner/repo" and "repo" formats. This is defensive coding - making the API forgiving for the user.
 
-**Lines 154-182:** Language breakdown with error handling
+**Lines 168-197:** Language breakdown with improved error handling
 ```python
 try:
     languages = self._api_request("GET", f"{endpoint}/languages")
     # Safely handle unexpected types...
-except Exception as e:
+    for k, v in languages.items():
+        try:
+            coerced[k] = int(v)
+        except (ValueError, TypeError) as e:
+            # Skip values that cannot be coerced to int
+            logger.debug(...)
+except (ValueError, httpx.HTTPError) as e:
     logger.debug(f"Could not fetch languages for {repo_name}: {e}")
     repo_data["language_breakdown"] = {}
 ```
 
-This is "fail soft" - if we can't get language stats, we continue with empty data rather than blowing up. Good practice for external APIs.
+**Improved exception handling:** Now catches specific exceptions (`ValueError`, `TypeError`, `httpx.HTTPError`) instead of the overly broad `Exception`. This is "fail soft" - if we can't get language stats, we continue with empty data rather than crashing. Best practice for external APIs.
 
 ## Core Component 2: MCP Server
 
@@ -197,7 +219,7 @@ This is the most interesting part! The `@server.list_tools()` decorator register
 Tool(
     name="get_my_repos",
     description=(
-        "List all repositories for the authenticated user (jw1). "
+        "List all repositories for the authenticated user. "
         "Returns repository name, description, stars, forks, primary language, "
         "visibility (public/private), and last updated date. "
         "Sorted by most recently updated first."
@@ -245,9 +267,15 @@ Each tool has an async function that:
 2. Formats the response as JSON
 3. Returns `TextContent` with JSON string
 
-**Example: `get_my_repos()` (Lines 160-193)**
+**Example: `get_my_repos()` (Lines 160-207)**
 
-Line 162: `assert github is not None` - Python's null check. If it's None, crash with an assertion error.
+Line 162-163: Null check with proper exception handling:
+```python
+if github is None:
+    raise RuntimeError("GitHub client not initialized")
+```
+
+Unlike `assert` statements (which can be disabled with Python's `-O` flag), this always raises an exception. It's the professional way to handle required preconditions.
 
 Lines 169-191: Building up a JSON response
 ```python
@@ -282,17 +310,24 @@ Line 193: `return [TextContent(type="text", text=json.dumps(result, indent=2))]`
 
 **Other Tool Implementations:**
 
-The other three tools follow the same JSON pattern:
+The other three tools follow the same pattern with null checks, input validation, and JSON responses:
 
-- **`get_repo_details()`** (Lines 196-239): Returns detailed repository info with nested objects for statistics, details, language breakdown, topics, and URLs
-- **`search_my_code()`** (Lines 242-273): Returns search results with query metadata and an array of matches (repository, path, url)
-- **`get_recent_activity()`** (Lines 276-347): Returns GitHub events with type-specific details (push events include branch/commit count, PRs include action/title, etc.)
+- **`get_repo_details()`** (Lines 214-274): Returns detailed repository info with nested objects for statistics, details, language breakdown, topics, and URLs
+- **`search_my_code()`** (Lines 261-297): Returns search results with query metadata and an array of matches (repository, path, url). Includes input validation for the `limit` parameter.
+- **`get_recent_activity()`** (Lines 300-367): Returns GitHub events with type-specific details (push events include branch/commit count, PRs include action/title, etc.). Also validates `limit` parameter.
 
-All four tools return structured JSON that Claude can easily parse and work with.
+All four tools:
+- Check if the GitHub client is initialized
+- Validate input parameters (limit must be 1-100)
+- Return structured JSON that Claude can easily parse
 
-### Application Startup (Lines 350-395)
+### Application Startup (Lines 379-432)
 
-**`main()` function (Lines 370-388):** The async entry point
+**`setup_github()` function (Lines 379-405):** Initializes the GitHub client
+
+This function now requires both `GITHUB_TOKEN` and `GITHUB_USERNAME` environment variables. The hardcoded default username was removed to prevent configuration errors.
+
+**`main()` function (Lines 408-427):** The async entry point
 ```python
 async def main():
     logger.info("Starting GitHub MCP server...")

@@ -15,6 +15,10 @@ import httpx
 
 logger = logging.getLogger("github-mcp")
 
+# Constants
+RATE_LIMIT_WARNING_THRESHOLD = 100
+DEFAULT_TIMEOUT = 30.0
+
 
 class GitHubClient:
     """Client for interacting with the GitHub API."""
@@ -32,13 +36,27 @@ class GitHubClient:
         self.token = token
         self.username = username
         self.client = httpx.Client(
-            timeout=30.0,
+            timeout=DEFAULT_TIMEOUT,
             headers={
                 "Authorization": f"token {token}",
                 "Accept": "application/vnd.github.v3+json",
                 "X-GitHub-Api-Version": "2022-11-28",
             }
         )
+
+    def __enter__(self):
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit context manager and close HTTP client."""
+        self.close()
+        return False
+
+    def close(self):
+        """Close the HTTP client and release resources."""
+        if hasattr(self, 'client'):
+            self.client.close()
 
     def _api_request(self, method: str, endpoint: str, **kwargs) -> Union[dict[str, Any], list[Any]]:
         """
@@ -63,7 +81,7 @@ class GitHubClient:
 
             # Check rate limiting
             remaining = response.headers.get("X-RateLimit-Remaining")
-            if remaining and int(remaining) < 100:
+            if remaining and int(remaining) < RATE_LIMIT_WARNING_THRESHOLD:
                 logger.warning(
                     f"GitHub API rate limit low: {remaining} requests remaining"
                 )
@@ -162,12 +180,13 @@ class GitHubClient:
                 for k, v in languages.items():
                     try:
                         coerced[k] = int(v)
-                    except Exception:
+                    except (ValueError, TypeError) as e:
                         # Skip values that cannot be coerced to int
                         logger.debug(
-                            "Skipping non-numeric language value for %s: %r",
+                            "Skipping non-numeric language value for %s: %r - %s",
                             k,
                             v,
+                            e,
                         )
                 repo_data["language_breakdown"] = coerced
             else:
@@ -177,7 +196,7 @@ class GitHubClient:
                     type(languages),
                 )
                 repo_data["language_breakdown"] = {}
-        except Exception as e:
+        except (ValueError, httpx.HTTPError) as e:
             logger.debug(f"Could not fetch languages for {repo_name}: {e}")
             repo_data["language_breakdown"] = {}
 

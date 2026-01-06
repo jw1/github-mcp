@@ -25,6 +25,11 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 logger = logging.getLogger("github-mcp")
 
+# Constants
+MIN_LIMIT = 1
+MAX_LIMIT = 100
+DEFAULT_LIMIT = 30
+
 # Initialize the MCP server
 server = Server("github-mcp")
 
@@ -137,17 +142,18 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         List of TextContent with the results
     """
     try:
-        limit = arguments.get("limit", 30)
-
         if name == "get_my_repos":
+            limit = arguments.get("limit", DEFAULT_LIMIT)
             return await get_my_repos(limit)
         elif name == "get_repo_details":
             repo_name = arguments["repo_name"]
             return await get_repo_details(repo_name)
         elif name == "search_my_code":
             query = arguments["query"]
+            limit = arguments.get("limit", DEFAULT_LIMIT)
             return await search_my_code(query, limit)
         elif name == "get_recent_activity":
+            limit = arguments.get("limit", DEFAULT_LIMIT)
             return await get_recent_activity(limit)
         else:
             raise ValueError(f"Unknown tool: {name}")
@@ -157,13 +163,30 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return [TextContent(type="text", text=f"Error: {str(e)}")]
 
 
-async def get_my_repos(limit: int = 30) -> list[TextContent]:
+async def get_my_repos(limit: int = DEFAULT_LIMIT) -> list[TextContent]:
     """Get list of user's repositories."""
-    assert github is not None, "GitHub client not initialized"
+    if github is None:
+        raise RuntimeError("GitHub client not initialized")
+
+    if limit < MIN_LIMIT or limit > MAX_LIMIT:
+        raise ValueError(f"limit must be between {MIN_LIMIT} and {MAX_LIMIT}")
+
     repos = github.get_user_repos(per_page=limit)
 
     if not repos:
-        return [TextContent(type="text", text="No repositories found.")]
+        return [TextContent(
+            type="text",
+            text=json.dumps({
+                "summary": {
+                    "user": github.username,
+                    "count": 0,
+                    "total_stars": 0,
+                    "total_forks": 0,
+                    "sorted_by": "recently_updated"
+                },
+                "repositories": []
+            })
+        )]
 
     # Build structured response
     result = {
@@ -195,7 +218,8 @@ async def get_my_repos(limit: int = 30) -> list[TextContent]:
 
 async def get_repo_details(repo_name: str) -> list[TextContent]:
     """Get detailed information about a specific repository."""
-    assert github is not None, "GitHub client not initialized"
+    if github is None:
+        raise RuntimeError("GitHub client not initialized")
     repo = github.get_repo_details(repo_name)
 
     # Calculate language breakdown percentages
@@ -239,9 +263,14 @@ async def get_repo_details(repo_name: str) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
 
-async def search_my_code(query: str, limit: int = 30) -> list[TextContent]:
+async def search_my_code(query: str, limit: int = DEFAULT_LIMIT) -> list[TextContent]:
     """Search for code across user's repositories."""
-    assert github is not None, "GitHub client not initialized"
+    if github is None:
+        raise RuntimeError("GitHub client not initialized")
+
+    if limit < MIN_LIMIT or limit > MAX_LIMIT:
+        raise ValueError(f"limit must be between {MIN_LIMIT} and {MAX_LIMIT}")
+
     results = github.search_code(query, per_page=limit)
 
     total_count: int = results.get("total_count", 0)
@@ -273,9 +302,14 @@ async def search_my_code(query: str, limit: int = 30) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
 
-async def get_recent_activity(limit: int = 30) -> list[TextContent]:
+async def get_recent_activity(limit: int = DEFAULT_LIMIT) -> list[TextContent]:
     """Get recent activity/events for the user."""
-    assert github is not None, "GitHub client not initialized"
+    if github is None:
+        raise RuntimeError("GitHub client not initialized")
+
+    if limit < MIN_LIMIT or limit > MAX_LIMIT:
+        raise ValueError(f"limit must be between {MIN_LIMIT} and {MAX_LIMIT}")
+
     events = github.get_user_events(per_page=limit)
 
     if not events:
@@ -356,7 +390,7 @@ async def setup_github() -> bool:
     global github
 
     token = os.getenv("GITHUB_TOKEN")
-    username = os.getenv("GITHUB_USERNAME", "jw1")
+    username = os.getenv("GITHUB_USERNAME")
 
     if not token:
         logger.error("GITHUB_TOKEN not found in environment variables")
@@ -365,9 +399,14 @@ async def setup_github() -> bool:
         logger.error("Required scopes: repo, read:user")
         return False
 
+    if not username:
+        logger.error("GITHUB_USERNAME not found in environment variables")
+        logger.error("Please set your GitHub username in the .env file or environment")
+        return False
+
     github = GitHubClient(token, username)
     logger.info(f"GitHub client initialized for user: {username}")
-    
+
     return True
 
 

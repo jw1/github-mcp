@@ -88,7 +88,7 @@ Add this to your Claude Desktop configuration file:
       "command": "github-mcp",
       "env": {
         "GITHUB_TOKEN": "ghp_your_actual_token_here",
-        "GITHUB_USERNAME": "jw1"
+        "GITHUB_USERNAME": "your_github_username"
       }
     }
   }
@@ -99,7 +99,7 @@ Add this to your Claude Desktop configuration file:
 
 - Put the token directly in the config (as shown above), OR
 - Reference the `.env` file by running the server from the project directory
-- You might needa use the absolute path instead of just "github-mcp" for command
+- You might need to use the absolute path instead of just "github-mcp" for command
 
 ## Usage
 
@@ -115,7 +115,7 @@ You should see:
 
 ```
 INFO:github-mcp:Starting GitHub MCP server...
-INFO:github-mcp:GitHub client initialized for user: jw1
+INFO:github-mcp:GitHub client initialized for user: your_username
 INFO:github-mcp:MCP server running on stdio
 ```
 
@@ -203,8 +203,10 @@ github-mcp/
 
 - Implements 4 tools for GitHub interaction
 - Async/await for efficient operations
-- Markdown formatting for readable responses
-- Comprehensive error handling
+- JSON formatted responses for structured data
+- Input validation (limit parameters must be 1-100)
+- Comprehensive error handling with specific exceptions
+- Resource cleanup with context managers
 
 ## Rate Limits
 
@@ -223,6 +225,13 @@ Make sure you've either:
 
 1. Created a `.env` file with your token, OR
 2. Added the token to your Claude Desktop config
+
+### "GITHUB_USERNAME not found in environment variables"
+
+The server requires your GitHub username to be set. Add it to:
+
+1. Your `.env` file: `GITHUB_USERNAME=your_username`, OR
+2. Your Claude Desktop config (see example above)
 
 ### "Authentication failed. Check your GITHUB_TOKEN"
 
@@ -306,11 +315,11 @@ This project demonstrates:
 
 ## License
 
-This project is provided as-is for educational and portfolio purposes.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Author
 
-Built by jw1 as a learning project to understand MCP fundamentals and demonstrate API integration skills.
+Built by James Warlick as a learning project to understand MCP fundamentals and demonstrate API integration skills.
 
 ## Acknowledgments
 

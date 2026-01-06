@@ -62,13 +62,17 @@ class TestGetMyRepos:
 
     @pytest.mark.asyncio
     async def test_handles_no_repos(self, mock_github_client):
-        """Should return appropriate message when no repos found."""
+        """Should return JSON with empty repositories when no repos found."""
         mock_github_client.get_user_repos.return_value = []
 
         with patch.object(server, 'github', mock_github_client):
             result = await server.get_my_repos()
 
-        assert "No repositories found" in result[0].text
+        # Parse JSON response
+        data = json.loads(result[0].text)
+        assert data["summary"]["user"] == "testuser"
+        assert data["summary"]["count"] == 0
+        assert data["repositories"] == []
 
     @pytest.mark.asyncio
     async def test_formats_repo_list(self, mock_github_client):
@@ -112,6 +116,27 @@ class TestGetMyRepos:
         assert repo["visibility"] == "public"
         assert repo["updated_at"] == "2024-01-01T00:00:00Z"
         assert repo["url"] == "https://github.com/testuser/test-repo"
+
+    @pytest.mark.asyncio
+    async def test_validates_limit_too_small(self, mock_github_client):
+        """Should raise ValueError when limit is less than 1."""
+        with patch.object(server, 'github', mock_github_client):
+            with pytest.raises(ValueError, match="limit must be between 1 and 100"):
+                await server.get_my_repos(limit=0)
+
+    @pytest.mark.asyncio
+    async def test_validates_limit_too_large(self, mock_github_client):
+        """Should raise ValueError when limit is greater than 100."""
+        with patch.object(server, 'github', mock_github_client):
+            with pytest.raises(ValueError, match="limit must be between 1 and 100"):
+                await server.get_my_repos(limit=101)
+
+    @pytest.mark.asyncio
+    async def test_validates_limit_negative(self, mock_github_client):
+        """Should raise ValueError when limit is negative."""
+        with patch.object(server, 'github', mock_github_client):
+            with pytest.raises(ValueError, match="limit must be between 1 and 100"):
+                await server.get_my_repos(limit=-5)
 
 
 class TestGetRepoDetails:
@@ -241,6 +266,13 @@ class TestSearchMyCode:
         assert match["path"] == "src/main.py"
         assert match["url"] == "https://github.com/testuser/repo1/blob/main/src/main.py"
 
+    @pytest.mark.asyncio
+    async def test_validates_limit_out_of_range(self, mock_github_client):
+        """Should raise ValueError when limit is out of valid range."""
+        with patch.object(server, 'github', mock_github_client):
+            with pytest.raises(ValueError, match="limit must be between 1 and 100"):
+                await server.search_my_code("test", limit=150)
+
 
 class TestGetRecentActivity:
     """Test the get_recent_activity tool handler."""
@@ -335,6 +367,13 @@ class TestGetRecentActivity:
         assert event["details"]["action"] == "opened"
         assert event["details"]["title"] == "Add new feature"
         assert event["details"]["number"] == 42
+
+    @pytest.mark.asyncio
+    async def test_validates_limit_boundary(self, mock_github_client):
+        """Should raise ValueError when limit is at boundary."""
+        with patch.object(server, 'github', mock_github_client):
+            with pytest.raises(ValueError, match="limit must be between 1 and 100"):
+                await server.get_recent_activity(limit=0)
 
 
 class TestCallToolDispatcher:
